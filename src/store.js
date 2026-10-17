@@ -6,8 +6,8 @@
 //   - the end of a 429 or 403 pause (kept across restarts and account changes);
 //   - a stop after a refusal and its next try (per account), so a restart
 //     never sends refused credentials again before their time.
-// Every time read back is bounded: nothing holds more than 24 h after a
-// restart. The file is readable by the container user only (0600).
+// Every time read back is bounded: a stop holds at most 24 h after a
+// restart, a 429 pause 6 h, a 403 pause 1 h. The file is readable by the container user only (0600).
 // -----------------------------------------------------------------------------
 
 import { readFile, rename, writeFile } from 'node:fs/promises';
@@ -43,11 +43,14 @@ const time = (value) => (Number.isFinite(value) ? value : undefined);
 const string = (value, max) =>
   typeof value === 'string' && value !== '' && value.length <= max ? value : undefined;
 
-/** A time read back from /data: in the future, at most 24 h away, else undefined. */
-export const bounded = (value, now) => {
+/** A time read back from /data: in the future, at most `max` away (24 h), else undefined. */
+export const bounded = (value, now, max = TIMINGS.persistedMax) => {
   const t = time(value);
-  return t !== undefined && t > now ? Math.min(t, now + TIMINGS.persistedMax) : undefined;
+  return t !== undefined && t > now ? Math.min(t, now + max) : undefined;
 };
+
+/** The longest pause of each kind: a 429 at most 6 h, a 403 at most 1 h. */
+const PAUSE_MAX = { rate: TIMINGS.rateLimitMax, forbidden: TIMINGS.forbiddenPause };
 
 const STOPS = new Set(['refused', 'login_rejected', 'session_refused']);
 
@@ -71,13 +74,11 @@ export function normalizeMemory(raw, now) {
         }
       : null;
   const pause = raw?.pause;
-  const until = bounded(pause?.until, now);
+  const max = Object.hasOwn(PAUSE_MAX, pause?.kind) ? PAUSE_MAX[pause.kind] : undefined;
+  const until = max === undefined ? undefined : bounded(pause.until, now, max);
   return {
     session,
-    pause:
-      until !== undefined && (pause.kind === 'rate' || pause.kind === 'forbidden')
-        ? { kind: pause.kind, until }
-        : null,
+    pause: until !== undefined ? { kind: pause.kind, until } : null,
     block,
   };
 }

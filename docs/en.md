@@ -42,7 +42,8 @@ On each side device:
 | Heating / cooling         | Off, heating or cooling low/medium/high (read only)               |
 
 The foundation, light, foot warming and climate features appear only when
-the bed has them. In bed and the firmness are read **every minute**; the
+the bed has them. In bed and the firmness are read **every minute** (on a
+"fuzion" bed, the firmness shown is read again every 5 minutes only); the
 foundation, the lights, the foot warming and the climate every 5 minutes;
 the sleep score every hour; the beds and their parts every 6 hours.
 
@@ -61,7 +62,9 @@ In the scene editor (Gladys 5.1 or later), category **Integrations**:
 They fire within a minute of the change, **never on the first reading**
 after a start (that is the state found, not a change), and never after an
 outage or a pause of more than 5 minutes (the change happened at an unknown
-time). The "In bed" feature can also start a scene, like any device.
+time). One that Gladys cannot take within 5 minutes (Gladys restarting) is
+dropped, never delivered late. The "In bed" feature can also start a scene,
+like any device.
 
 ## Setup
 
@@ -84,8 +87,11 @@ every command while **Allow the commands** is off. On:
 - **Set the firmness**: 5 to 100, by 5 only (any other value is refused);
 - **Move the foundation to**: one of the presets the bed offers (Flat,
   Favorite, Read, Watch TV, Zero G, Snore). There is no command for a free
-  head or foot position: only presets;
-- **Stop the foundation**: stops a moving foundation;
+  head or foot position: only presets. **A preset moves the bed with
+  whoever lies on it**, also when a scene sends it at night: allow the
+  commands knowingly, and keep such scenes for when you are awake;
+- **Stop the foundation**: stops a moving foundation. It always goes: it
+  never waits for another command, nor for a pause after a 429;
 - **Night light**: on or off.
 
 Firmness and presets are choices, the stop is a button: a "turn everything
@@ -98,7 +104,11 @@ useless command is not sent; a firmness change while the bed is already
 adjusting is refused; a state that cannot be read refuses the command. The
 stop is sent without a read (it is always safe). A command that cannot leave
 within 3.5 seconds is refused unsent. Gladys gets an answer after 4.3 seconds
-at most; the real state shows about 10 seconds later. One command at a time.
+at most; the real state shows about 10 seconds later. One command at a time:
+two commands sent together (two lights turned off by a scene) go one after
+the other, and one that cannot leave in time is refused unsent. A command
+never signs in to SleepIQ: while the integration is not signed in, it is
+refused ("not connected").
 
 The foot warming and the heating/cooling are read only: the integration
 never heats nor cools.

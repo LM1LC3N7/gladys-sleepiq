@@ -493,13 +493,132 @@ test('a slow command is answered within 5 s, one at a time', async (t) => {
   await settle();
   const ack = await pending;
   assert.equal(ack.success, true, 'answered at 4.3 s, the request still running');
-  const busy = await set(gladys, RIGHT, 'set-firmness', '60');
-  assert.match(busy.error, /encore en cours/);
+  // The next one waits in line; past its own deadline it is refused unsent.
+  const queued = set(gladys, RIGHT, 'set-firmness', '60');
+  await settle();
+  t.mock.timers.tick(TIMINGS.commandSendBy);
+  await settle();
+  assert.match((await queued).error, /précédente a pris trop de temps/);
+  assert.equal(server.commands().length, 1);
+  // The stop never waits in line.
+  const stop = await set(gladys, LEFT, 'stop-foundation', 1);
+  assert.equal(stop.success, true, stop.error);
   release();
   await settle();
   await advance(TIMINGS.refreshAfterCommand);
   const next = await set(gladys, RIGHT, 'set-firmness', '60');
   assert.equal(next.success, true, next.error);
+});
+
+test('two commands at once: the second waits for the first, then goes', async (t) => {
+  const { gladys, server } = await setup(t, { config: COMMANDS_ON });
+  const [a, b] = await Promise.all([
+    set(gladys, LEFT, 'night-light', 0),
+    set(gladys, RIGHT, 'night-light', 1),
+  ]);
+  assert.equal(a.success, true, a.error);
+  assert.equal(b.success, true, b.error);
+  assert.deepEqual(
+    server.commands().map((c) => c.json),
+    [
+      { outletId: 4, setting: 0 },
+      { outletId: 3, setting: 1 },
+    ],
+  );
+});
+
+test('a command never signs in nor drops the key', async (t) => {
+  const { gladys, server, app } = await setup(t, { config: COMMANDS_ON });
+  server.revoke();
+  const ack = await set(gladys, LEFT, 'set-firmness', '50');
+  assert.match(ack.error, /n'a pas pu être lu/);
+  assert.equal(server.logins().length, 1, 'no sign-in from a command');
+  assert.ok(app.client.session, 'the key is kept: the next main read decides');
+  app.client.session = null;
+  const none = await set(gladys, LEFT, 'set-firmness', '50');
+  assert.match(none.error, /Pas connecté/);
+  assert.equal(server.logins().length, 1);
+  assert.equal(server.commands().length, 0);
+});
+
+test('a scene event Gladys cannot take within 5 min is dropped, not delivered late', async (t) => {
+  const { gladys, server, advance } = await setup(t);
+  const publish = gladys.publishSceneEvent.bind(gladys);
+  let gladysDown = true;
+  gladys.publishSceneEvent = async (...args) => {
+    if (gladysDown) {
+      throw Object.assign(new Error('Gladys unreachable'), { status: 503 });
+    }
+    return publish(...args);
+  };
+  server.sides[`${BED}:left`] = { isInBed: true };
+  await advance(MINUTE);
+  await advance(10 * MINUTE);
+  gladysDown = false;
+  await advance(MINUTE);
+  assert.equal(gladys.fake.sceneEvents.length, 0, 'too late: dropped');
+  server.sides[`${BED}:left`] = { isInBed: false };
+  await advance(MINUTE);
+  assert.deepEqual(
+    gladys.fake.sceneEvents.map((e) => e.key),
+    ['out_of_bed'],
+  );
+});
+
+test('a 401 or 403 of a probe never hides a bed; two 404 in a row do', async (t) => {
+  const { gladys, server, app, advance } = await setup(t);
+  const pause = `/rest/bed/${BED}/pauseMode`;
+  server.queue.push({ match: (r) => r.path === pause, status: 403 });
+  await advance(TIMINGS.inventoryInterval, 5 * MINUTE);
+  assert.equal(app.beds.length, 1, 'a 403: the bed stays');
+  assert.equal(app.beds[0].probed, false, 'probed again later');
+  await advance(5 * MINUTE, MINUTE);
+  assert.equal(app.beds[0].probed, true);
+  // One 404: kept and probed again; a second 404 in a row: gone.
+  server.queue.push({ match: (r) => r.path === pause, status: 404 });
+  await advance(TIMINGS.inventoryInterval + 10 * MINUTE, 5 * MINUTE);
+  assert.equal(server.queue.length, 0);
+  assert.equal(app.beds.length, 1, 'one 404 then an answer: kept');
+  assert.equal(app.beds[0].notFound, 0);
+  server.queue.push(
+    { match: (r) => r.path === pause, status: 404 },
+    { match: (r) => r.path === pause, status: 404 },
+  );
+  await advance(TIMINGS.inventoryInterval + 10 * MINUTE, 5 * MINUTE);
+  assert.equal(server.queue.length, 0, 'probed again');
+  assert.equal(app.beds.length, 0, 'two 404 in a row');
+  assert.ok(gladys.fake.discoveredDevices.length === 0);
+});
+
+test('a bed list without beds is an error; a bed missing once stays; no bed: read again in 5 min', async (t) => {
+  const server = fakeSleepIQ();
+  const { app, advance } = await setup(t, { server });
+  server.queue.push({ match: (r) => r.path === '/rest/bed', status: 200, body: {} });
+  await advance(TIMINGS.inventoryInterval, 5 * MINUTE);
+  assert.equal(app.beds.length, 1, 'an answer without its list changes nothing');
+  const saved = server.beds;
+  server.beds = [];
+  await advance(TIMINGS.inventoryInterval, 5 * MINUTE);
+  assert.equal(app.beds.length, 1, 'missing from one list: kept');
+  await advance(TIMINGS.inventoryInterval, 5 * MINUTE);
+  assert.equal(app.beds.length, 0, 'missing twice: gone');
+  const reads = server.of('/rest/bed', 'GET').length;
+  server.beds = saved;
+  await advance(5 * MINUTE, MINUTE);
+  assert.equal(server.of('/rest/bed', 'GET').length, reads + 1, 'no bed: read again after 5 min');
+  assert.equal(app.beds.length, 1);
+});
+
+test('right after a refused password, the test button waits a few minutes', async (t) => {
+  const server = fakeSleepIQ();
+  server.password = 'other';
+  const { gladys, advance } = await setup(t, { server });
+  const ack = await gladys.fake.action(ACTIONS.TEST_CONNECTION);
+  assert.match(ack.data.message.en, /wait 5 min/);
+  assert.equal(server.logins().length, 1);
+  await advance(5 * MINUTE, MINUTE);
+  await gladys.fake.action(ACTIONS.TEST_CONNECTION);
+  assert.equal(server.logins().length, 2, 'then one try per click');
 });
 
 test('a Gladys reconnection republishes the devices, the status and the states', async (t) => {

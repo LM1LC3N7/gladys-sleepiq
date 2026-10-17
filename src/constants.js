@@ -219,8 +219,14 @@ export const TIMINGS = {
   sessionRetry: [HOUR, 6 * HOUR, 24 * HOUR],
   /** A refused e-mail/password or a rejected sign-in: one new try after 6 h, then every 24 h. */
   refusedRetry: [6 * HOUR, 24 * HOUR],
-  /** Longest a persisted pause or stop may still hold at a restart. */
+  /** Longest a persisted stop may still hold at a restart (a pause: its own maximum). */
   persistedMax: 24 * HOUR,
+  /** A 404 that survived a fresh sign-in is a real 404 for this long (no sign-in for it). */
+  realNotFound: 6 * HOUR,
+  /** After a refused password, the test button waits this long before trying again. */
+  refusedTestDelay: 5 * MINUTE,
+  /** A bed that disappears from GET bed, or answers 404 to its probe, twice in a row is gone. */
+  missingTwice: 2,
   /** The publisher sends what is pending every second; unchanged states again every 30 min. */
   flushInterval: 1_000,
   stateHeartbeat: 30 * MINUTE,

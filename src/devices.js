@@ -63,7 +63,8 @@ export const DEFINITIONS = {
   [FEATURES.OCCUPIED]: binary,
   [FEATURES.IN_BED]: binary,
   [FEATURES.FIRMNESS]: integer(100),
-  [FEATURES.PRESSURE]: integer(1_000_000),
+  // A raw value changing at every breath: no history (it would fill the database).
+  [FEATURES.PRESSURE]: integer(1_000_000, false),
   [FEATURES.SLEEP_SCORE]: integer(100),
   [FEATURES.HEAD_POSITION]: integer(100, false),
   [FEATURES.FOOT_POSITION]: integer(100, false),

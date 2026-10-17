@@ -46,6 +46,8 @@ export class SleepIQClient {
     this.relogged = false;
     /** Per-request timeout; undefined = the default (shorter for the test button). */
     this.timeout = undefined;
+    /** Until then, a 404 of a main read is a real 404 (it survived a fresh sign-in). */
+    this.realNotFoundUntil = -Infinity;
   }
 
   configure({ email, password, session = null }) {
@@ -191,7 +193,7 @@ export class SleepIQClient {
   }
 
   /** One API request with the current key; resolves the parsed JSON (or undefined). */
-  async call(method, path, { query = {}, payload, deadline, onSent } = {}) {
+  async call(method, path, { query = {}, payload, deadline, onSent, signal } = {}) {
     if (!this.session) {
       throw new SleepIQError('not_signed_in', 'not signed in to SleepIQ', { notSent: true });
     }
@@ -203,6 +205,7 @@ export class SleepIQClient {
       body,
       timeout: this.timeoutFor(deadline),
       onSent,
+      ...(signal ? { signal } : {}),
     });
     this.storeCookies(answer.headers);
     const error = apiError(answer, { now: this.now() });
@@ -228,7 +231,7 @@ export class SleepIQClient {
     try {
       return await this.call(method, path, options);
     } catch (err) {
-      if (err.kind !== 'unauthorized' && err.kind !== 'not_found') {
+      if (!this.signsInAgain(err)) {
         throw err;
       }
       if (fresh) {
@@ -244,7 +247,22 @@ export class SleepIQClient {
     }
   }
 
+  /**
+   * Whether an error of a main read is worth a new sign-in: a 401, or a 404
+   * (asyncsleepiq), unless a 404 lately survived a fresh sign-in (then it is
+   * a real 404 for a few hours: no sign-in per cycle for it).
+   */
+  signsInAgain(err) {
+    if (err.kind === 'unauthorized') {
+      return true;
+    }
+    return err.kind === 'not_found' && this.now() >= this.realNotFoundUntil;
+  }
+
   refusedAgain(err) {
+    if (err.kind === 'not_found') {
+      this.realNotFoundUntil = this.now() + TIMINGS.realNotFound;
+    }
     if (err.kind !== 'unauthorized') {
       return err;
     }
@@ -275,16 +293,19 @@ export class SleepIQClient {
 
   /**
    * A command: sent once, never retried (a retry could act twice), and never
-   * sent after `sendBy` (it is refused unsent instead). A refused key is left
-   * to the next main read, which signs in again: a command never signs in in
-   * a loop.
+   * sent after `sendBy` (it is refused unsent instead). A command never signs
+   * in and never drops the key: without a key it is `not_signed_in` (unsent),
+   * and a refused key is left to the next main read, which signs in again.
+   * `signal` aborts a request that has not fully left yet.
    */
-  async command(method, path, { payload, query, sendBy, onSent } = {}) {
-    await this.ensureKey({ deadline: sendBy });
+  async command(method, path, { payload, query, sendBy, onSent, signal } = {}) {
+    if (!this.session) {
+      throw new SleepIQError('not_signed_in', 'not signed in to SleepIQ', { notSent: true });
+    }
     if (sendBy !== undefined && sendBy - this.now() < 300) {
       throw new SleepIQError('timeout', 'no time left to send the command', { notSent: true });
     }
-    return this.call(method, path, { payload, query, onSent });
+    return this.call(method, path, { payload, query, onSent, signal });
   }
 
   /** The body of a bamkey call (asyncsleepiq's bamkey). */

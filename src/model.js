@@ -395,7 +395,7 @@ export function readSleepScore(json) {
       Number(s.totalSleepSessionTime ?? 0) > Number(best.totalSleepSessionTime ?? 0) ? s : best,
     );
   }
-  const raw = primary ? primary.sleepQuotient : (json.avgSleepIQ ?? json.sleepIQAvg);
+  const raw = primary ? primary.sleepQuotient : json.avgSleepIQ || json.sleepIQAvg; // `or`, as asyncsleepiq
   const score = finiteInteger(raw, 0, 100);
   return score === undefined || score === 0 ? undefined : score;
 }

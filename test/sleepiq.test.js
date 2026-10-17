@@ -40,6 +40,15 @@ test('the transport: answers with their cookies, a bounded body, a timeout', asy
     httpRequest(`${s.url}/slow`, { timeout: 50 }),
     (err) => err instanceof SleepIQError && err.kind === 'timeout' && !err.notSent,
   );
+  const aborted = new AbortController();
+  aborted.abort();
+  let left = false;
+  await assert.rejects(
+    httpRequest(`${s.url}/`, { signal: aborted.signal, onSent: () => (left = true) }),
+    (err) => err.kind === 'timeout' && err.notSent,
+    'aborted before it left: never sent',
+  );
+  assert.equal(left, false);
   await assert.rejects(
     httpRequest('http://127.0.0.1:1/', { timeout: 2000 }),
     (err) => err.kind === 'network' && err.notSent,

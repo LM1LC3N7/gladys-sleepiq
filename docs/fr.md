@@ -43,7 +43,8 @@ Sur chaque appareil de côté :
 
 Les fonctionnalités de base, de veilleuse, de chauffe-pieds et de
 climatisation n'apparaissent que si le lit en a. La présence et la fermeté
-sont lues **toutes les minutes** ; la base, les veilleuses, le chauffe-pieds
+sont lues **toutes les minutes** (sur un lit « fuzion », la fermeté affichée
+n'est relue que toutes les 5 minutes) ; la base, les veilleuses, le chauffe-pieds
 et la climatisation toutes les 5 minutes ; le score de sommeil toutes les
 heures ; les lits et leurs éléments toutes les 6 heures.
 
@@ -64,8 +65,10 @@ Dans l'éditeur de scènes (Gladys 5.1 ou plus récent), catégorie
 Ils se déclenchent dans la minute qui suit le changement, **jamais à la
 première lecture** après un démarrage (c'est l'état trouvé, pas un
 changement), et jamais après une coupure ou une pause de plus de 5 minutes
-(le changement a eu lieu à une heure inconnue). La fonctionnalité « Au lit »
-peut aussi lancer une scène, comme n'importe quel appareil.
+(le changement a eu lieu à une heure inconnue). Un déclencheur que Gladys ne
+peut pas recevoir dans les 5 minutes (Gladys qui redémarre) est abandonné,
+jamais livré en retard. La fonctionnalité « Au lit » peut aussi lancer une
+scène, comme n'importe quel appareil.
 
 ## Mise en place
 
@@ -92,8 +95,13 @@ Activé :
 - **Mettre la base en position** : une des positions que le lit propose (À
   plat, Favorite, Lecture, Télévision, Zéro gravité, Anti-ronflement). Pas de
   commande de position libre de la tête ou des pieds : seulement des
-  positions enregistrées ;
-- **Arrêter la base** : arrête une base en mouvement ;
+  positions enregistrées. **Une position fait bouger le lit avec la personne
+  couchée dessus**, y compris quand une scène l'envoie la nuit : n'autorisez
+  les commandes qu'en connaissance de cause, et gardez ces scènes pour
+  quand vous êtes éveillé ;
+- **Arrêter la base** : arrête une base en mouvement. L'arrêt passe
+  toujours : il n'attend jamais une autre commande, ni une pause après un
+  429 ;
 - **Veilleuse** : allumée ou éteinte.
 
 La fermeté et les positions sont des choix, l'arrêt est un bouton : un
@@ -108,7 +116,11 @@ que le lit règle déjà sa fermeté est refusé ; un état illisible refuse la
 commande. L'arrêt est envoyé sans lecture (il est toujours sûr). Une
 commande qui ne peut pas partir dans les 3,5 secondes est refusée sans être
 envoyée. Gladys reçoit une réponse en 4,3 secondes au plus ; l'état réel
-s'affiche environ 10 secondes plus tard. Une commande à la fois.
+s'affiche environ 10 secondes plus tard. Une commande à la fois : deux
+commandes envoyées ensemble (deux veilleuses éteintes par une scène) passent
+l'une après l'autre, et celle qui ne peut plus partir à temps est refusée
+sans être envoyée. Une commande ne se connecte jamais à SleepIQ : tant que
+l'intégration n'est pas connectée, elle est refusée (« pas connecté »).
 
 Le chauffe-pieds et le chauffage/refroidissement sont en lecture seule :
 l'intégration ne chauffe ni ne refroidit jamais.

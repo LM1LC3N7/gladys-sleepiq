@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { SleepIQClient } from '../src/client.js';
 import { PATHS } from '../src/constants.js';
 import { SleepIQError, apiError, bamkeyText, loginError, parseRetryAfter } from '../src/sleepiq.js';
+import { normalizeMemory } from '../src/store.js';
 import { EMAIL, PASSWORD } from './fixtures/sleepiq.js';
 import { fakeSleepIQ } from './helpers/fakeSleepIQ.js';
 
@@ -86,6 +87,41 @@ test('bamkey answers: PASS stripped, FAIL is an error', () => {
     () => bamkeyText({ cdcResponse: 'FAIL:unknown command' }),
     (err) => err instanceof SleepIQError && err.kind === 'bamkey_failed',
   );
+});
+
+test('a 404 that survives a fresh sign-in signs in no more for a while; a 401 still does', async () => {
+  const server = fakeSleepIQ();
+  let now = 0;
+  const c = new SleepIQClient({ transport: server.transport, now: () => now });
+  c.configure({ email: EMAIL, password: PASSWORD, session: { key: 'stale', at: 0 } });
+  c.beginCycle();
+  await assert.rejects(c.read('bed/nothing'), (err) => err.kind === 'not_found');
+  assert.equal(server.logins().length, 1);
+  c.beginCycle();
+  await assert.rejects(c.read('bed/nothing'), (err) => err.kind === 'not_found');
+  assert.equal(server.logins().length, 1, 'a real 404: no sign-in for it');
+  server.revoke();
+  await c.read(PATHS.familyStatus);
+  assert.equal(server.logins().length, 2, 'a 401 still signs in');
+  now += 7 * 3600_000;
+  c.beginCycle();
+  await assert.rejects(c.read('bed/nothing'));
+  assert.equal(server.logins().length, 3, 'hours later, a 404 may be a stale key again');
+});
+
+test('the pauses read back from /data are bounded by their kind', () => {
+  const now = 0;
+  const far = 48 * 3600_000;
+  assert.equal(
+    normalizeMemory({ pause: { kind: 'rate', until: far } }, now).pause.until,
+    6 * 3600_000,
+  );
+  assert.equal(
+    normalizeMemory({ pause: { kind: 'forbidden', until: far } }, now).pause.until,
+    3600_000,
+  );
+  assert.equal(normalizeMemory({ pause: { kind: 'other', until: far } }, now).pause, null);
+  assert.equal(normalizeMemory({ pause: { kind: 'toString', until: far } }, now).pause, null);
 });
 
 test('only plain cookies are kept, bounded', () => {

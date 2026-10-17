@@ -80,26 +80,38 @@ up to date at the end of every milestone.
   is reused until the API refuses it; a 401 or 404 of a main read signs in
   once and retries once (asyncsleepiq); at most one sign-in per cycle; a 401
   right after a new sign-in is `session_refused` (1 h, 6 h, 24 h); a 404 then
-  is a real 404 (backoff). Secondary reads never sign in. A command never
-  signs in in a loop (a 401 there is left to the next main read).
+  is a real 404 (backoff) and, for 6 hours, a 404 no longer signs in (only a
+  401 does: no sign-in per cycle for a real 404). Secondary reads never sign
+  in. **Commands never sign in nor drop the key** (review): their fresh read
+  is a secondary read, and without a key a command is refused unsent
+  ("not connected"); a 401 there is left to the next main read.
 - **Stops (brief: "refus → arrêt avec relance bornée")**: a refused
   e-mail/password (401) or a rejected sign-in (403 "User Agent is blocked",
   other 4xx) stops, with one new try after 6 h then every 24 h (never dead
   without a timer, spaced so a wrong password cannot lock the account);
   persisted per account and bounded to 24 h at a restart; a change of
-  credentials or the test button lifts it.
+  credentials or the test button lifts it; the button waits 5 minutes after
+  a refusal before sending the password again (review).
 - **429**: `Retry-After` bounded to 1 min – 6 h, 15 min without it; applies
   to the polling, the secondary reads, the button and the commands (also
   answered in the background); persisted and kept across Gladys
-  reconnections and account changes. **403** of the main read: one hour,
-  same scope. **5xx/network**: 2, 5, 10, 15, then 30 minutes, never shorter
+  reconnections and account changes; read back from `/data` bounded to 6 h
+  (a 403 pause to 1 h). **403** of the main read: one hour, same scope. A
+  command checks the pause again right before sending. **5xx/network**: 2, 5, 10, 15, then 30 minutes, never shorter
   than the 1-minute interval.
 - **Intervals**: presence (`bed/familyStatus`: in bed, firmness, pressure)
   every 60 s (brief, Home Assistant); foundation, lights, foot warming,
   climate (and the fuzion firmness) every 5 minutes; sleep score every hour
   (Home Assistant); beds, sleepers and their parts every 6 hours. A failed
-  secondary read waits its own interval (lot-6 lesson); a part probe that
-  fails is tried again after 5 minutes.
+  secondary read waits its own interval (lot-6 lesson), except a 401 of the
+  6-hour bed list, tried again at the next cycle (after the main read signed
+  in again); a part probe that fails is tried again after 5 minutes.
+- **Beds never vanish on one answer** (review): a `GET bed` answer without a
+  `beds` list is a `bad_response`; a bed missing from one list stays, gone
+  after two lists in a row; with no bed at all, the list is read again every
+  5 minutes. A probe hides a bed only on a 404 (or a bamkey `FAIL`): a 401,
+  403 or 5xx tries again in 5 minutes; a bed that answered before stays
+  until two probes in a row say 404.
 - **Devices and ids**: `bed:<bedId>` and `side:<bedId>:left|right` (brief:
   bed id + side, not the sleeper id Home Assistant uses for its firmness).
   Bed ids are checked (`-?[A-Za-z0-9_]{1,64}`). A side gets a device only
@@ -112,22 +124,32 @@ up to date at the end of every milestone.
   publish), copied as created (lot-6 lesson).
 - **Beds skipped**: the "Firmness Control" controller and duplicate sleepers
   (Home Assistant); a bed whose `pauseMode` (classic) or privacy state
-  (fuzion) answers a 4xx (asyncsleepiq `valid()`); 10 beds at most.
+  (fuzion) answers 404 / FAIL (asyncsleepiq `valid()`, see above); 10 beds
+  at most.
+- **Category of "in bed"** (to confirm before the release): `motion-sensor`/
+  `binary`, as the core maps the Zigbee `occupancy` and `presence` sensors;
+  nothing automatic in the core reacts to it (review), HomeKit sees an
+  occupancy-like motion sensor, the MCP server reads it. Alternatives
+  rejected: `presence-sensor` (the core's "check the presence" would take
+  the bed as "seen" at every reading), `unknown`/`binary` (loses HomeKit and
+  the MCP server's reading).
 - **Features and units**: in bed and someone in bed on `motion-sensor`/
-  `binary` (the core maps the Zigbee `occupancy` and `presence` sensors
-  there; `presence-sensor` is the core's user presence, not used);
+  `binary` (above);
   firmness, raw pressure, sleep score, head and foot positions on
   `unknown`/`integer` without unit (no core unit fits: Sleep Number is a
   setting, the pressure is a raw value, the positions are 0-100 of the
   actuator, the score has no unit); preset, foot warming and climate as
   `text`. All fixed at creation. Sleep score: an integer (the brief allowed
-  text or integer), not published when there is none (a 0 is "no score").
+  text or integer), not published when there is none (a 0 is "no score");
+  the night's average read as `avgSleepIQ || sleepIQAvg` like asyncsleepiq.
+  The raw pressure keeps no history (it changes at every breath).
 - **Scene triggers** `in_bed` / `out_of_bed` with two `source: devices`
   filters (bed, side) and five variables. Never on the first reading of a
   side (start, restart, new account), never when the previous reading is
   more than 5 minutes old (an outage, a pause: logged only), never on an
   unknown value. The previous presence is in memory only (a restart starts
-  a new baseline). `gladys_version >= 5.1.0` for `scene_triggers`.
+  a new baseline). An event is dated when queued and dropped (logged) if
+  Gladys could not take it within 5 minutes (review): never delivered late. `gladys_version >= 5.1.0` for `scene_triggers`.
 - **Commands** (`allow_commands`, off by default; brief): firmness as a
   `text`/`select` of 5 to 100 by 5 (any other value refused), foundation
   presets as a `text`/`select` of the presets the bed offers, a
@@ -137,9 +159,16 @@ up to date at the end of every milestone.
   firmness, foundation status / current preset, the outlet / under-bed
   light), nothing sent when already so, a firmness change refused while a
   fuzion bed reports it is adjusting, refused when the state cannot be read;
-  the stop is sent without a read (always safe). One command at a time,
-  never retried; nothing sent after 3.5 s, Gladys answered at 4.3 s at the
-  latest, a read 10 s after.
+  the stop is sent without a read (always safe). One command at a time
+  (review): the others wait in line, each with its own 3.5 s deadline, and
+  are refused unsent only once it is too close; **the stop skips the line
+  and the 429 pause** (stopping a moving bed comes first; SleepIQ may still
+  refuse it). Never retried; a request not fully sent at its deadline is
+  aborted (`onSent` + abort signal), Gladys answered at 4.3 s at the latest,
+  a read 10 s after.
+- **`sourceApplication` of the bamkey calls** (to check on a fuzion bed):
+  "Gladys SleepIQ", where asyncsleepiq sends "AsyncSleepIQ API". If the API
+  turns out to check it, use asyncsleepiq's value.
 - **Night light as a light (brief: "switch acceptable pour une lumière ?
   juge et note")**: yes, `light`/`binary`. A "turn the lights off" reaching
   a night light is what a user expects, and both directions are harmless;
@@ -153,7 +182,8 @@ up to date at the end of every milestone.
   heating or cooling a bed from an automation was not asked for.
 - **Timezone**: a configuration field (default America/Chicago, Sleep
   Number's home time zone) used for the date of the sleep data
-  (asyncsleepiq sends the local wall clock; the container runs in UTC).
+  (asyncsleepiq sends the local wall clock; the container runs in UTC). An
+  unknown zone is logged (a warning) and the default used.
 - **Language**: default `fr`, as the sibling integrations (the bed itself is
   sold in the US: an English user switches it).
 - **Reconnection to Gladys** (`connected`): republishes the status, the

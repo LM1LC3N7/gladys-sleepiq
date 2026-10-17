@@ -118,6 +118,11 @@ export const T = {
       `SleepIQ refuse les requêtes (HTTP 403) : pause de ${wait.fr}.`,
     ),
   test: {
+    refusedWait: (wait) =>
+      both(
+        `The password was refused a moment ago: wait ${wait.en} before testing again.`,
+        `Le mot de passe vient d'être refusé : attendez ${wait.fr} avant de tester à nouveau.`,
+      ),
     cooldown: both(
       'Already read less than 30 seconds ago.',
       'Déjà lu il y a moins de 30 secondes.',
@@ -144,9 +149,9 @@ export const ERRORS = {
     'The firmness goes from 5 to 100, by 5.',
     'La fermeté va de 5 à 100, par pas de 5.',
   ),
-  stillRunning: both(
-    'A command is still running: try again in a few seconds.',
-    'Une commande est encore en cours : réessayez dans quelques secondes.',
+  queuedTooLong: both(
+    'The previous command took too long: this one was not sent, try again.',
+    "La commande précédente a pris trop de temps : celle-ci n'a pas été envoyée, réessayez.",
   ),
   adjusting: both(
     'The bed is already adjusting its firmness: try again when it is done.',

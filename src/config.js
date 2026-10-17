@@ -35,6 +35,9 @@ export function normalizeConfig(raw = {}) {
     account: email === '' ? '' : accountKey(email),
     allowCommands: flag(raw?.allow_commands),
     timezone: validTimezone(timezone) ? timezone : DEFAULTS.timezone,
+    /** The time zone typed, when it is not one Node knows (logged; the default is used). */
+    invalidTimezone:
+      timezone !== '' && !validTimezone(timezone) ? timezone.slice(0, 64) : undefined,
     language: LANGUAGES.includes(language) ? language : DEFAULTS.language,
   };
 }

@@ -4,8 +4,9 @@
 //
 // - push(): the current value of a feature. The last one wins; unchanged
 //   values are skipped by publishChangedStates and sent again every 30 min.
-// - pushSceneEvent(): a scene trigger (in bed, out of bed). Queued and all
-//   sent, never merged.
+// - pushSceneEvent(): a scene trigger (in bed, out of bed). Queued and sent,
+//   never merged; dated when queued, dropped (logged) when Gladys could not
+//   take it within TIMINGS.eventMaxGap.
 // Everything left over (budget spent, Gladys unreachable) waits for the next
 // flush, every second.
 // -----------------------------------------------------------------------------
@@ -55,7 +56,7 @@ export class StatePublisher {
   }
 
   pushSceneEvent(key, data) {
-    this.sceneEvents.push({ key, data });
+    this.sceneEvents.push({ key, data, at: this.now() });
     if (this.sceneEvents.length > LIMITS.queuedEvents) {
       this.sceneEvents.shift();
     }
@@ -88,7 +89,15 @@ export class StatePublisher {
     const now = this.now();
     this.sceneWindow = this.sceneWindow.filter((t) => now - t < MINUTE);
     while (this.sceneEvents.length > 0 && this.sceneWindow.length < LIMITS.sceneEventsPerMinute) {
-      const { key, data } = this.sceneEvents[0];
+      const { key, data, at } = this.sceneEvents[0];
+      if (now - at > TIMINGS.eventMaxGap) {
+        // Gladys was unreachable too long: a late "in bed" is history, not news.
+        this.logger.info(
+          `Scene event ${key} not sent: ${Math.round((now - at) / 60_000)} min late`,
+        );
+        this.sceneEvents.shift();
+        continue;
+      }
       try {
         await this.gladys.publishSceneEvent(key, data);
       } catch (err) {

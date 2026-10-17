@@ -37,11 +37,24 @@ import {
 } from './model.js';
 import { SleepIQError } from './sleepiq.js';
 
-/** A part the API says is not there: a 4xx (but a 429), or a bamkey failure. */
+/**
+ * A part the API says is not there: a 404, or a bamkey failure. Any other
+ * error (a 401 or 403 included) says nothing about the part: the probe is
+ * tried again later.
+ */
 export const absent = (err) =>
-  err instanceof SleepIQError &&
-  (err.kind === 'bamkey_failed' ||
-    (err.status >= 400 && err.status < 500 && err.kind !== 'rate_limited'));
+  err instanceof SleepIQError && (err.kind === 'bamkey_failed' || err.status === 404);
+
+/** The status of a check -> exists (2xx), absent (404), else the error. */
+function exists(status) {
+  if (status < 300) {
+    return true;
+  }
+  if (status === 404) {
+    return false;
+  }
+  throw new SleepIQError('http', 'probe refused', { status });
+}
 
 /** The fuzion side word of a part (a shared one is read as the right side, as asyncsleepiq). */
 const word = (side) => SIDE_KEY[side].toLowerCase();
@@ -111,7 +124,7 @@ export async function probeBed(client, accountId, bed, options = {}) {
       }
     }
   } else {
-    const valid = (await client.check(PATHS.pauseMode(bed.id), options)) < 300;
+    const valid = exists(await client.check(PATHS.pauseMode(bed.id), options));
     if (!valid) {
       return { valid: false, parts };
     }
@@ -132,7 +145,7 @@ export async function probeBed(client, accountId, bed, options = {}) {
         ...options,
         query: { outletId: light.outlet },
       });
-      if (status < 300) {
+      if (exists(status)) {
         parts.lights.push(light);
       }
     }

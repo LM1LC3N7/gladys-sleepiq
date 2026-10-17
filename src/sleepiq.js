@@ -85,6 +85,7 @@ export function httpRequest(
     timeout = TIMINGS.requestTimeout,
     maxBytes = LIMITS.responseBytes,
     onSent,
+    signal,
   } = {},
 ) {
   return new Promise((resolve, reject) => {
@@ -135,6 +136,19 @@ export function httpRequest(
       req.destroy();
     }, timeout);
     req.on('error', (err) => settle(reject, networkError(err, !sent)));
+    // Aborted before it fully left: never sent (a command past its deadline).
+    // Once sent, the answer is awaited as usual.
+    const abort = () => {
+      if (!sent) {
+        settle(reject, new SleepIQError('timeout', 'not sent in time', { notSent: true }));
+        req.destroy();
+      }
+    };
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener('abort', abort, { once: true });
     req.end(body);
   });
 }

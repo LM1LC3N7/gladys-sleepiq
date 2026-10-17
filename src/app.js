@@ -100,8 +100,10 @@ export class SleepIQApp {
     this.started = false;
     this.lastStatus = undefined;
     this.lastTestAt = -Infinity;
-    /** A command in flight (one at a time). */
-    this.commanding = false;
+    /** The line of commands (one at a time; the stop skips it): resolves when the last is done. */
+    this.commandChain = Promise.resolve();
+    /** When a refused password stopped the account (the test button waits a little after it). */
+    this.refusedAt = -Infinity;
     this.pausedUntil = 0;
     /** 'rate' (a 429: every path waits), 'forbidden' (every path too) or 'backoff'. */
     this.pauseKind = undefined;
@@ -114,6 +116,7 @@ export class SleepIQApp {
     this.stop();
     await this.running;
     this.config = normalizeConfig(raw);
+    this.warnTimezone();
     this.reset();
     this.memory = normalizeMemory(await this.store.load().catch(() => null), this.now());
     const { email, password, account } = this.config;
@@ -227,6 +230,9 @@ export class SleepIQApp {
       return this.start(raw, { clearBlock: true });
     }
     this.config = next;
+    if (next.invalidTimezone !== previous.invalidTimezone) {
+      this.warnTimezone();
+    }
     if (next.timezone !== previous.timezone) {
       this.sleepAt = -Infinity;
     }
@@ -234,6 +240,14 @@ export class SleepIQApp {
       await this.publishDevices();
       this.queueStates();
       await this.flush();
+    }
+  }
+
+  warnTimezone() {
+    if (this.config.invalidTimezone) {
+      this.logger.warn(
+        `SleepIQ: unknown time zone "${this.config.invalidTimezone}", ${this.config.timezone} used for the sleep score`,
+      );
     }
   }
 
@@ -328,6 +342,10 @@ export class SleepIQApp {
   /** The beds and their sleepers (GET bed is the main read the first time). */
   async discover(options) {
     const beds = await this.client.read(PATHS.beds, options);
+    if (!Array.isArray(beds?.beds)) {
+      // An answer without its list is no proof the beds are gone.
+      throw new SleepIQError('bad_response', 'SleepIQ sent no bed list');
+    }
     let sleepers;
     try {
       sleepers = await this.client.read(PATHS.sleepers, { ...options, secondary: true });
@@ -346,16 +364,32 @@ export class SleepIQApp {
     const before = new Map((this.inventory?.beds ?? []).map((bed) => [bed.id, bed]));
     for (const bed of found.beds) {
       // The parts known so far stay until the bed is probed again.
-      bed.parts = before.get(bed.id)?.parts;
-      bed.valid = before.get(bed.id)?.valid;
+      const old = before.get(bed.id);
+      bed.parts = old?.parts;
+      bed.valid = old?.valid;
+      bed.notFound = old?.notFound ?? 0;
+      bed.missing = 0;
       bed.probed = false;
       bed.probeAt = -Infinity;
     }
+    // A bed missing from one list only stays: gone after two lists in a row.
+    const listed = new Set(found.beds.map((bed) => bed.id));
+    const kept = [...before.values()]
+      .filter((bed) => !listed.has(bed.id))
+      .map((bed) => ({ ...bed, missing: (bed.missing ?? 0) + 1 }))
+      .filter((bed) => bed.missing < TIMINGS.missingTwice);
+    for (const bed of kept) {
+      this.logger.info(`SleepIQ: bed ${bed.name} missing from the bed list, kept for now`);
+    }
     this.inventory = {
       accountId: found.accountId ?? this.inventory?.accountId,
-      beds: found.beds,
+      beds: [...found.beds, ...kept],
     };
-    this.inventoryAt = this.now();
+    // No bed at all: read the list again in 5 minutes, not in 6 hours.
+    this.inventoryAt =
+      this.inventory.beds.length === 0
+        ? this.now() - TIMINGS.inventoryInterval + TIMINGS.foundationInterval
+        : this.now();
   }
 
   async run({ quick = false } = {}) {
@@ -429,8 +463,11 @@ export class SleepIQApp {
       try {
         await this.discover(secondary);
       } catch (err) {
-        // Tried again at the next interval, not at the next minute.
-        this.inventoryAt = now;
+        // A stale key (401): tried again at the next cycle, once the main
+        // read has signed in again; anything else at the next interval.
+        if (err?.kind !== 'unauthorized') {
+          this.inventoryAt = now;
+        }
         note(err, 'beds');
       }
     }
@@ -449,13 +486,23 @@ export class SleepIQApp {
           bed,
           options,
         );
-        bed.valid = valid;
-        bed.parts = parts;
         bed.probed = true;
-        // Fresh parts are read at once.
-        this.partsAt = -Infinity;
-        if (!valid) {
-          this.logger.info(`SleepIQ: bed ${bed.name} does not answer, skipped`);
+        if (valid) {
+          bed.valid = true;
+          bed.notFound = 0;
+          bed.parts = parts;
+          // Fresh parts are read at once.
+          this.partsAt = -Infinity;
+        } else {
+          bed.notFound = (bed.notFound ?? 0) + 1;
+          if (bed.valid === true && bed.notFound < TIMINGS.missingTwice) {
+            // A bed that answered stays until two probes in a row say 404.
+            bed.probed = false;
+            this.logger.info(`SleepIQ: bed ${bed.name} answered 404, probed again in 5 min`);
+          } else {
+            bed.valid = false;
+            this.logger.info(`SleepIQ: bed ${bed.name} does not answer, skipped`);
+          }
         }
       } catch (err) {
         note(err, 'bed parts');
@@ -584,6 +631,9 @@ export class SleepIQApp {
         status: err.status,
       };
       this.retrying = undefined;
+      if (err.kind !== 'session_refused') {
+        this.refusedAt = this.now();
+      }
       this.memory.block = { account: this.config.account, ...this.block };
       await this.saveMemory();
       this.logger.warn(
@@ -777,6 +827,17 @@ export class SleepIQApp {
     if (this.running) {
       return T.busy;
     }
+    // Right after a refused password, a click does not send it again at once
+    // (repeated refusals may lock the account): a few minutes first.
+    const refused = this.block?.kind === 'refused' || this.block?.kind === 'login_rejected';
+    const wait = this.refusedAt + TIMINGS.refusedTestDelay - this.now();
+    if (refused && wait > 0) {
+      const text = T.test.refusedWait(age(wait));
+      return {
+        en: `${text.en} ${this.blockMessage().en}`,
+        fr: `${text.fr} ${this.blockMessage().fr}`,
+      };
+    }
     this.lastTestAt = this.now();
     // One try per click: the button is how a stopped account is tried again.
     if (this.block) {
@@ -827,31 +888,51 @@ export class SleepIQApp {
     if (!this.client.hasCredentials || this.block || !this.inventory) {
       throw this.error(ERRORS.notConnected);
     }
+    const stop = target.role === FEATURES.STOP;
     const paused = this.pauseMessage();
-    if (paused) {
+    // The stop always goes: no pause, no queue (stopping a moving bed matters
+    // more than a 429; the worst case is SleepIQ refusing it).
+    if (paused && !stop) {
       throw this.error(paused);
     }
-    if (this.commanding) {
-      throw this.error(ERRORS.stillRunning);
-    }
     const wanted = this.wanted(target, value);
-    this.commanding = true;
+    const job = { target, wanted, received, generation: this.generation };
+    if (stop) {
+      await this.command(job);
+      return;
+    }
+    // One command at a time: the others wait in line, each with its own
+    // deadline; one whose turn comes too late is refused unsent.
+    let release;
+    const slot = new Promise((resolve) => {
+      release = resolve;
+    });
+    const previous = this.commandChain;
+    this.commandChain = previous.then(() => slot);
     let background;
     try {
-      ({ background } = await this.command({
-        target,
-        wanted,
-        received,
-        generation: this.generation,
-      }));
+      await this.waitTurn(previous, received);
+      ({ background } = await this.command(job));
     } finally {
       if (background) {
-        background.finally(() => {
-          this.commanding = false;
-        });
+        background.finally(release);
       } else {
-        this.commanding = false;
+        release();
       }
+    }
+  }
+
+  /** Waits for the previous command, or refuses this one once its deadline is too close. */
+  async waitTurn(previous, received) {
+    const latest = received + TIMINGS.commandSendBy - TIMINGS.commandMinRead;
+    let handle;
+    const late = new Promise((resolve) => {
+      handle = this.timers.setTimeout(() => resolve('late'), Math.max(0, latest - this.now()));
+    });
+    const outcome = await Promise.race([previous.then(() => 'turn'), late]);
+    this.timers.clearTimeout(handle);
+    if (outcome === 'late') {
+      throw this.error(ERRORS.queuedTooLong);
     }
   }
 
@@ -903,7 +984,7 @@ export class SleepIQApp {
   async plan({ bed, owner, role }, wanted, deadline) {
     const account = this.inventory.accountId;
     const fuzion = bed.kind === 'fuzion';
-    const read = { deadline };
+    const read = { deadline, secondary: true };
     const ids = ownerIds(this.gladys, bed.id, owner);
     const unknown = (value) => {
       if (value === undefined) {
@@ -935,18 +1016,18 @@ export class SleepIQApp {
         };
       }
       return {
-        send: (sendBy) =>
+        send: (o) =>
           fuzion
             ? this.client.bamkeyCommand(
                 account,
                 bed.id,
                 'START_SLEEP_NUMBER_ADJUSTMENT',
                 [owner, String(wanted)],
-                { sendBy },
+                o,
               )
             : this.client.command('PUT', PATHS.sleepNumber(bed.id), {
                 payload: { sleepNumber: wanted, side: SIDE_LETTER[owner] },
-                sendBy,
+                ...o,
               }),
       };
     }
@@ -979,18 +1060,18 @@ export class SleepIQApp {
         };
       }
       return {
-        send: (sendBy) =>
+        send: (o) =>
           fuzion
             ? this.client.bamkeyCommand(
                 account,
                 bed.id,
                 'SET_PRESET',
                 [sideWord(owner), PRESETS[wanted].fuzion],
-                { sendBy },
+                o,
               )
             : this.client.command('PUT', PATHS.foundationPreset(bed.id), {
                 payload: { preset: PRESETS[wanted].classic, side: SIDE_LETTER[owner], speed: 0 },
-                sendBy,
+                ...o,
               }),
       };
     }
@@ -1012,29 +1093,29 @@ export class SleepIQApp {
         return { done: [[ids.feature(FEATURES.LIGHT), { state: current ? 1 : 0 }]] };
       }
       return {
-        send: (sendBy) =>
+        send: (o) =>
           fuzion
             ? this.client.bamkeyCommand(
                 account,
                 bed.id,
                 'SET_UNDERBED_LIGHT',
                 [wanted ? 'high' : 'off', '0'],
-                { sendBy },
+                o,
               )
             : this.client.command('PUT', PATHS.outlet(bed.id), {
                 payload: { outletId: outlet, setting: wanted ? 1 : 0 },
-                sendBy,
+                ...o,
               }),
       };
     }
     // Stop: always safe, sent without a read (there is nothing to compare).
     return {
-      send: (sendBy) =>
+      send: (o) =>
         fuzion
-          ? this.client.bamkeyCommand(account, bed.id, 'HALT_ALL_ACTUATORS', [], { sendBy })
+          ? this.client.bamkeyCommand(account, bed.id, 'HALT_ALL_ACTUATORS', [], o)
           : this.client.command('PUT', PATHS.foundationMotion(bed.id), {
               payload: { footMotion: 1, headMotion: 1, massageMotion: 1, side: SIDE_LETTER[owner] },
-              sendBy,
+              ...o,
             }),
     };
   }
@@ -1057,6 +1138,9 @@ export class SleepIQApp {
       if (!(err instanceof SleepIQError)) {
         throw err;
       }
+      if (err.kind === 'not_signed_in') {
+        throw this.error(ERRORS.notConnected);
+      }
       const held = await this.hold(err);
       throw this.error(held ?? ERRORS.unknownState);
     }
@@ -1078,10 +1162,34 @@ export class SleepIQApp {
       throw this.error(ERRORS.tooSlow);
     }
     const { role, bed, owner } = target;
+    // A 429 may have arrived during the read (from the polling): checked again.
+    const paused = role === FEATURES.STOP ? undefined : this.pauseMessage();
+    if (paused) {
+      throw this.error(paused);
+    }
     this.logger.info(
       `SleepIQ command: ${role} on ${bed.name} ${owner} -> ${role === FEATURES.STOP ? 'stop' : wanted}`,
     );
-    const request = plan.send(sendBy);
+    // Not fully sent at the deadline: aborted, never sent late.
+    const controller = new AbortController();
+    let sent = false;
+    const deadline = this.timers.setTimeout(
+      () => {
+        if (!sent) {
+          controller.abort();
+        }
+      },
+      Math.max(0, sendBy - this.now()),
+    );
+    const request = plan
+      .send({
+        sendBy,
+        signal: controller.signal,
+        onSent: () => {
+          sent = true;
+        },
+      })
+      .finally(() => this.timers.clearTimeout(deadline));
     // The parts (positions, presets, lights) are read again with the next read.
     const followUp = () => {
       if (generation === this.generation) {
@@ -1132,6 +1240,9 @@ export class SleepIQApp {
     followUp();
     const reason = errorReason(err);
     this.logger.warn(`SleepIQ command ${role} failed: ${reason}`);
+    if (err?.kind === 'not_signed_in') {
+      throw this.error(ERRORS.notConnected);
+    }
     if (err?.notSent) {
       throw this.error(ERRORS.tooSlow);
     }
