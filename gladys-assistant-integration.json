@@ -1,177 +1,295 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "SleepIQ",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Sleep Number beds (US) via the SleepIQ cloud: in bed, firmness, sleep score; optional commands.",
+    "fr": "Lits Sleep Number (US) par le cloud SleepIQ : présence au lit, fermeté, score ; commandes en option."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-sleepiq:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-sleepiq/main/cover.png",
+  "categories": ["appliances"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your SleepIQ account",
+        "fr": "Votre compte SleepIQ"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Shows your Sleep Number beds in Gladys through the SleepIQ cloud: for each side, in bed or not (read every minute, with \"In bed\" and \"Out of bed\" scene triggers), firmness, pressure and the sleep score of the night; the foundation, the night light, the foot warming and the climate when the bed has them. Enter the e-mail and password of the SleepIQ app, save, then add the beds from the Discovery tab. The firmness, the foundation presets and the night light can be changed from Gladys only if you allow the commands below. Unofficial API, never tested with a real account. Not affiliated with Sleep Number.",
+        "fr": "Affiche vos lits Sleep Number dans Gladys par le cloud SleepIQ : pour chaque côté, présence au lit (lue toutes les minutes, avec les déclencheurs de scène « Entrée au lit » et « Sortie du lit »), fermeté, pression et score de sommeil de la nuit ; la base, la veilleuse, le chauffe-pieds et la climatisation quand le lit en a. Saisissez l'e-mail et le mot de passe de l'application SleepIQ, enregistrez, puis ajoutez les lits depuis l'onglet Découverte. La fermeté, les positions de la base et la veilleuse ne se changent depuis Gladys que si vous autorisez les commandes ci-dessous. API non officielle, jamais testée avec un vrai compte. Sans lien avec Sleep Number."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-sleepiq/blob/main/docs/fr.md",
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-sleepiq/blob/main/docs/en.md",
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "email",
+      "type": "string",
+      "label": {
+        "en": "SleepIQ e-mail",
+        "fr": "E-mail SleepIQ"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "placeholder": {
+        "en": "you@example.com",
+        "fr": "vous@exemple.fr"
+      },
+      "required": true
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+      "key": "password",
+      "type": "secret",
+      "label": {
+        "en": "SleepIQ password",
+        "fr": "Mot de passe SleepIQ"
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "description": {
+        "en": "Kept by Gladys in its database, never shown again, sent only to the SleepIQ sign-in.",
+        "fr": "Gardé par Gladys dans sa base, jamais réaffiché, envoyé seulement à la connexion SleepIQ."
+      },
+      "required": true
     },
     {
-      "key": "unit",
+      "key": "allow_commands",
+      "type": "boolean",
+      "label": {
+        "en": "Allow the commands",
+        "fr": "Autoriser les commandes"
+      },
+      "description": {
+        "en": "Off by default. On: Gladys may change the firmness (5 to 100), move the foundation to a preset or stop it, and turn the night light on or off. Off: these features refuse every command.",
+        "fr": "Désactivé par défaut. Activé : Gladys peut changer la fermeté (5 à 100), mettre la base dans une position enregistrée ou l'arrêter, et allumer ou éteindre la veilleuse. Désactivé : ces fonctionnalités refusent toute commande."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "timezone",
+      "type": "string",
+      "label": {
+        "en": "Time zone of the bed",
+        "fr": "Fuseau horaire du lit"
+      },
+      "description": {
+        "en": "Used to ask SleepIQ for the sleep score of the right night. IANA name, e.g. America/Chicago or America/New_York.",
+        "fr": "Sert à demander à SleepIQ le score de sommeil de la bonne nuit. Nom IANA, ex. America/Chicago ou America/New_York."
+      },
+      "placeholder": {
+        "en": "America/Chicago",
+        "fr": "America/Chicago"
+      },
+      "required": false,
+      "default": "America/Chicago"
+    },
+    {
+      "key": "language",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
-    },
-    {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "label": {
+        "en": "Language of the feature names",
+        "fr": "Langue des noms des fonctionnalités"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "Used for the names of the devices and features added from now on, for the texts shown and for the command errors.",
+        "fr": "Sert aux noms des appareils et des fonctionnalités ajoutés désormais, aux textes affichés et aux erreurs des commandes."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": "fr",
+      "options": [
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
+      "description": {
+        "en": "Signs in if needed and reads the beds once. Also tries again at once after a refused sign-in.",
+        "fr": "Se connecte si besoin et lit les lits une fois. Réessaie aussi tout de suite après une connexion refusée."
+      },
+      "timeout_seconds": 60
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "in_bed",
+      "label": {
+        "en": "Got into bed",
+        "fr": "Entrée au lit"
+      },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+        "en": "Someone got into a Sleep Number bed (seen within a minute). Never fired by the first reading after a start.",
+        "fr": "Quelqu'un s'est couché dans un lit Sleep Number (vu en moins d'une minute). Jamais déclenché par la première lecture après un démarrage."
       },
       "fields": [
         {
-          "key": "device",
+          "key": "bed_device",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
+          "label": {
+            "en": "Bed",
+            "fr": "Lit"
+          }
         },
         {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
+          "key": "side_device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Side of the bed",
+            "fr": "Côté du lit"
+          }
         }
       ],
       "variables": [
         {
-          "key": "target",
+          "key": "side",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
+          "label": {
+            "en": "Side (left or right)",
+            "fr": "Côté (left ou right)"
+          }
+        },
+        {
+          "key": "side_name",
+          "type": "string",
+          "label": {
+            "en": "Side name",
+            "fr": "Nom du côté"
+          }
+        },
+        {
+          "key": "bed_name",
+          "type": "string",
+          "label": {
+            "en": "Bed name",
+            "fr": "Nom du lit"
+          }
+        },
+        {
+          "key": "sleeper_name",
+          "type": "string",
+          "label": {
+            "en": "Sleeper first name",
+            "fr": "Prénom du dormeur"
+          }
+        },
+        {
+          "key": "at",
+          "type": "string",
+          "label": {
+            "en": "Time seen (UTC)",
+            "fr": "Heure constatée (UTC)"
+          }
         }
       ]
-    }
-  ],
-  "scene_actions": [
+    },
     {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
+      "key": "out_of_bed",
+      "label": {
+        "en": "Got out of bed",
+        "fr": "Sortie du lit"
       },
-      "timeout_seconds": 15,
+      "description": {
+        "en": "Someone got out of a Sleep Number bed (seen within a minute). Never fired by the first reading after a start.",
+        "fr": "Quelqu'un s'est levé d'un lit Sleep Number (vu en moins d'une minute). Jamais déclenché par la première lecture après un démarrage."
+      },
       "fields": [
         {
-          "key": "device",
+          "key": "bed_device",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
+          "label": {
+            "en": "Bed",
+            "fr": "Lit"
+          }
+        },
+        {
+          "key": "side_device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Side of the bed",
+            "fr": "Côté du lit"
+          }
         }
       ],
-      "outputs": [
+      "variables": [
         {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
+          "key": "side",
+          "type": "string",
+          "label": {
+            "en": "Side (left or right)",
+            "fr": "Côté (left ou right)"
+          }
+        },
+        {
+          "key": "side_name",
+          "type": "string",
+          "label": {
+            "en": "Side name",
+            "fr": "Nom du côté"
+          }
+        },
+        {
+          "key": "bed_name",
+          "type": "string",
+          "label": {
+            "en": "Bed name",
+            "fr": "Nom du lit"
+          }
+        },
+        {
+          "key": "sleeper_name",
+          "type": "string",
+          "label": {
+            "en": "Sleeper first name",
+            "fr": "Prénom du dormeur"
+          }
+        },
+        {
+          "key": "at",
+          "type": "string",
+          "label": {
+            "en": "Time seen (UTC)",
+            "fr": "Heure constatée (UTC)"
+          }
         }
       ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

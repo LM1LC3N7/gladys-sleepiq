@@ -12,44 +12,27 @@ the notes of the version's GitHub Release.
 
 ### Added
 
-- A working example of scene triggers, scene actions and dashboard widgets
-  (Gladys 5.1.0 or later).
-- `CHANGELOG.md`, rolled by the Release workflow.
-- A GitHub Release for every version, with its changelog section as notes: the
-  Gladys Supervision page links each version to the repository's releases.
-- CI runs the tests on Node 22 and 24, and builds the Docker image.
-- Dependabot keeps the npm dependencies and the GitHub Actions up to date.
-- `SECURITY.md` (how to report a vulnerability) and `CLAUDE.md` (project rules
-  for contributors and coding assistants).
-- Manifest tests: `version` matches `package.json`, `docker_image` is tagged
-  with it, descriptions hold 10 to 100 characters, placeholders are
-  multi-language objects.
-- The latitude and longitude fields show an example value as placeholder.
+- Sign-in to the SleepIQ cloud with the e-mail and the password of the
+  SleepIQ app (like asyncsleepiq); the session key kept in `/data` and reused,
+  no sign-in per cycle.
+- One device per Sleep Number bed (someone in bed, shared foundation, under-bed
+  light) and one per side with a sleeper: in bed, firmness, raw pressure,
+  sleep score of the night, head and foot positions, foundation preset, night
+  light, foot warming and heating/cooling when the bed has them. Classic and
+  "fuzion" beds.
+- "Got into bed" and "Got out of bed" scene triggers, per bed and per side,
+  never fired by the first reading after a start nor after a gap.
+- Firmness (5 to 100 by 5), foundation presets, a foundation stop button and
+  the night light, refused unless "Allow the commands" is on (off by
+  default); each command reads the bed first and is answered within Gladys'
+  5 s.
+- Presence read every minute; foundation and lights every 5 minutes; sleep
+  score every hour.
+- Resilience: a refused password stops with one new try after 6 h then every
+  24 h; a refused session after 1 h, 6 h, 24 h; 429 pauses every path (1
+  minute to 6 hours), 403 one hour, kept in `/data`; 5xx and network errors
+  retried after 2 to 30 minutes.
+- "Test the connection" button; documentation in English and French;
+  `LICENSE` and `THIRD_PARTY_NOTICES.md` shipped in the image.
 
-### Changed
-
-- Node.js 22 or later is required (Node 20 is end-of-life).
-- Integration SDK 0.15.0. The tests now run against the fake Gladys of the
-  SDK, which refuses the payloads Gladys refuses.
-- The refresh interval is one minute minimum, the fastest Gladys polls a
-  device. The plug's power is only sent when it changes, and every 30
-  minutes otherwise.
-
-### Fixed
-
-- Gladys refused the devices of the Discovery tab: the weather station and
-  the plug declared their poll frequency in seconds instead of one of the
-  values Gladys accepts, and were never polled. They now poll every minute,
-  and the readings follow the refresh interval of the configuration.
-
-- The release commit no longer fails `npm run format:check`: the Release
-  workflow updates the manifest `version` and `docker_image` in place instead
-  of re-printing the whole file with `jq`.
-- The integration can write to `/data`: the image creates the directory owned
-  by the `node` user, a new Docker volume was owned by root.
-- A sub-container running the integration's own image follows it to the new
-  tag at each release, as well as in the manifest of the build summary: it kept
-  the previous tag, which may not exist on the registry. Sub-containers on a
-  third-party image (a broker, a database...) keep theirs.
-
-[Unreleased]: https://github.com/GladysAssistant/integration-template-js/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-sleepiq/commits/main
