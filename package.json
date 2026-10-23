@@ -1,6 +1,6 @@
 {
   "name": "gladys-sleepiq",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Sleep Number beds (US) for Gladys Assistant through the SleepIQ cloud: in-bed presence, firmness, pressure and sleep score per side, foundation and lights; in-bed / out-of-bed scene triggers; commands behind an off-by-default option.",
   "type": "module",
