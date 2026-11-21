@@ -38,7 +38,7 @@ test('the store basics, and the version set by hand to 0.1.0 everywhere', () => 
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, manifest.version);
   assert.equal(lock.packages[''].version, manifest.version);
-  assert.match(manifest.gladys_version, /^>=5\.1\.0$/, 'scene_triggers need 5.1.0');
+  assert.match(manifest.gladys_version, /^>=5\.3\.0$/, 'scene_triggers need 5.1.0');
   assert.deepEqual(manifest.transports, ['cloud']);
   assert.deepEqual(manifest.categories, ['appliances']);
   for (const lang of ['en', 'fr']) {
@@ -129,4 +129,13 @@ test('the scene triggers are those the code fires, with device filters', () => {
     const keys = [...trigger.fields, ...trigger.variables].map((f) => f.key);
     assert.equal(new Set(keys).size, keys.length, `${trigger.key}: a key used twice`);
   }
+});
+
+test('the catalog countries: the United States, which needs Gladys >= 5.3.0', () => {
+  assert.deepEqual(manifest.countries, ['US']);
+  const [major, minor] = manifest.gladys_version
+    .match(/>=\s*(\d+)\.(\d+)/)
+    .slice(1)
+    .map(Number);
+  assert.ok(major > 5 || (major === 5 && minor >= 3), 'countries needs Gladys 5.3.0');
 });
